@@ -1,8 +1,8 @@
 __id__ = "badge_manager"
 __name__ = "Badge Manager"
-__description__ = "Extera_badges"
+__description__ = "Бейджі з Gist + красиві налаштування + автооновлення"
 __author__ = "@dravexix"
-__version__ = "16.0"
+__version__ = "15.2"
 __icon__ = "msg_emoji"
 __min_version__ = "12.5.0"
 
@@ -13,26 +13,23 @@ import threading
 import requests
 import hashlib
 import random
-from base_plugin import BasePlugin, MenuItemData, MenuItemType, MethodHook, hook_filters, HookFilter
+from base_plugin import BasePlugin, MenuItemData, MenuItemType, MethodHook
 from hook_utils import find_class, get_private_field
 from java.lang import Long
 from org.telegram.messenger import ApplicationLoader, MessagesController, UserConfig, AndroidUtilities, R
 from ui.bulletin import BulletinHelper
-from ui.settings import Switch, Divider, Text, Header
+from ui.settings import Divider, Text, Header
 from ui.alert import AlertDialogBuilder
 from android.widget import LinearLayout, TextView, ScrollView, FrameLayout, EditText, Button, CheckBox
 from android.view import Gravity, View
 from android.util import TypedValue
-from org.telegram.ui.ActionBar import Theme, BottomSheet
-from org.telegram.ui.Components import LayoutHelper, BackupImageView, AvatarDrawable
-from android.graphics.drawable import GradientDrawable, RippleDrawable
-from android.content.res import ColorStateList
+from org.telegram.ui.ActionBar import Theme
+from org.telegram.ui.Components import LayoutHelper
 from android.text import InputType
 from client_utils import get_last_fragment
 from android_utils import run_on_ui_thread, OnClickListener
-from java import dynamic_proxy
-from android.content import DialogInterface
-from java.util import ArrayList
+from android.graphics.drawable import GradientDrawable, RippleDrawable
+from android.content.res import ColorStateList
 
 # ============================================
 #  КОНСТАНТИ
@@ -53,59 +50,6 @@ GITHUB_RAW_URL = "https://gist.githubusercontent.com/69676769/d10056f821bc628cce
 
 VERSION_URL = "https://raw.githubusercontent.com/69676769/67-/main/Version.txt"
 PLUGIN_URL = "https://raw.githubusercontent.com/69676769/67-/main/Manager"
-
-# ============================================
-#  АВТООНОВЛЕННЯ (без зайвих сповіщень)
-# ============================================
-
-def apply_update_if_available(force_notify=False):
-    """
-    Перевіряє наявність нової версії і автоматично завантажує її.
-    Якщо force_notify=True — показує повідомлення про результат (успіх/помилка/немає оновлень).
-    """
-    try:
-        response = requests.get(VERSION_URL, timeout=5)
-        if response.status_code != 200:
-            if force_notify:
-                run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Не вдалося перевірити оновлення."))
-            return
-
-        latest_version = response.text.strip()
-        if latest_version == __version__:
-            if force_notify:
-                run_on_ui_thread(lambda: BulletinHelper.show_info("ℹ️ Ви використовуєте останню версію плагіна."))
-            return
-
-        # Нова версія є — завантажуємо без зайвих питань
-        if force_notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_info("🔄 Завантаження оновлення..."))
-
-        # Завантажуємо новий код
-        plugin_response = requests.get(PLUGIN_URL, timeout=10)
-        if plugin_response.status_code != 200:
-            if force_notify:
-                run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Помилка завантаження оновлення."))
-            return
-
-        new_code = plugin_response.text
-        cache_dir = ApplicationLoader.applicationContext.getCacheDir().getAbsolutePath()
-        path = os.path.join(cache_dir, "plugin_update.py")
-        with open(path, "w") as f:
-            f.write(new_code)
-
-        # Застосовуємо оновлення через систему плагінів
-        from com.exteragram.messenger.plugins import PluginsController, PluginsConstants
-        PluginsController.getInstance().engines.get(PluginsConstants.PYTHON).loadPluginFromFile(path, None, None)
-
-        if force_notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_success("✅ Плагін оновлено! Перезапустіть клієнт."))
-        else:
-            # При тихому оновленні просто пишемо в лог (або в бота)
-            send_to_bot(f"🔄 Плагін оновлено до версії {latest_version}")
-
-    except Exception as e:
-        if force_notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_error(f"❌ Помилка оновлення: {e}"))
 
 # ============================================
 #  КЕШ ХЕША
@@ -136,6 +80,70 @@ def send_to_bot(text):
         )
     except:
         pass
+
+# ============================================
+#  ПРИМУСОВЕ ОНОВЛЕННЯ ПЛАГІНА
+# ============================================
+
+def force_update_plugin():
+    """Примусово завантажує останню версію плагіна з GitHub без перевірки версії"""
+    try:
+        run_on_ui_thread(lambda: BulletinHelper.show_info("⬇️ Завантаження оновлення..."))
+        response = requests.get(PLUGIN_URL, timeout=10)
+        if response.status_code == 200:
+            path = os.path.join(ApplicationLoader.applicationContext.getCacheDir().getAbsolutePath(), "plugin_update.py")
+            with open(path, "w") as f:
+                f.write(response.text)
+            from com.exteragram.messenger.plugins import PluginsController, PluginsConstants
+            PluginsController.getInstance().engines.get(PluginsConstants.PYTHON).loadPluginFromFile(path, None, None)
+            run_on_ui_thread(lambda: BulletinHelper.show_success("✅ Плагін оновлено! Перезапустіть клієнт."))
+        else:
+            run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Помилка завантаження оновлення."))
+    except Exception as e:
+        run_on_ui_thread(lambda: BulletinHelper.show_error(f"❌ Помилка: {e}"))
+
+# ============================================
+#  АВТООНОВЛЕННЯ (перевірка версії)
+# ============================================
+
+def check_for_updates(force_notify=False):
+    try:
+        response = requests.get(VERSION_URL, timeout=5)
+        if response.status_code == 200:
+            latest = response.text.strip()
+            if latest != __version__:
+                show_update_notification(latest)
+                return True
+            elif force_notify:
+                run_on_ui_thread(lambda: BulletinHelper.show_info("ℹ️ Ви використовуєте останню версію плагіна."))
+    except:
+        if force_notify:
+            run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Помилка перевірки оновлень."))
+    return False
+
+def show_update_notification(latest_version):
+    def show():
+        BulletinHelper.show_with_button(
+            f"🔄 Доступне оновлення!\nПоточна: {__version__}\nНова: {latest_version}",
+            R.drawable.ic_download,
+            "Оновити",
+            lambda: download_update(),
+            duration=int(BulletinHelper.DURATION_PROLONG)
+        )
+    run_on_ui_thread(show)
+
+def download_update():
+    try:
+        response = requests.get(PLUGIN_URL, timeout=10)
+        if response.status_code == 200:
+            path = os.path.join(ApplicationLoader.applicationContext.getCacheDir().getAbsolutePath(), "plugin_update.py")
+            with open(path, "w") as f:
+                f.write(response.text)
+            from com.exteragram.messenger.plugins import PluginsController, PluginsConstants
+            PluginsController.getInstance().engines.get(PluginsConstants.PYTHON).loadPluginFromFile(path, None, None)
+            run_on_ui_thread(lambda: BulletinHelper.show_success("✅ Плагін оновлено! Перезапустіть клієнт."))
+    except Exception as e:
+        run_on_ui_thread(lambda: BulletinHelper.show_error(f"❌ Помилка оновлення: {e}"))
 
 # ============================================
 #  РОБОТА З КОРИСТУВАЧАМИ
@@ -329,48 +337,6 @@ class BadgeManager:
             send_to_bot(f"❌ Помилка: {e}")
 
 # ============================================
-#  НАЛАШТУВАННЯ (красивий інтерфейс)
-# ============================================
-
-class BadgeSettingsHeaderHook(MethodHook):
-    def __init__(self, plugin):
-        self.plugin = plugin
-
-    @hook_filters(HookFilter.Condition("param.thisObject != null"), HookFilter.ArgumentNotNull(0))
-    def after_hooked_method(self, param):
-        try:
-            activity = param.thisObject
-            items = param.args[0]
-            if not items or items.size() == 0:
-                return
-
-            plugin_obj = get_private_field(activity, "plugin")
-            if not plugin_obj or str(plugin_obj.getId()) != __id__:
-                return
-
-            if get_private_field(activity, "createSubFragmentCallback") is not None:
-                return
-
-            header = self.plugin._create_premium_header(activity.getContext())
-            if header:
-                from org.telegram.ui.Components import UItem
-                try:
-                    from com.exteragram.messenger.plugins.models import HeaderSetting
-                    item = UItem.asCustom(header)
-                    item.settingItem = HeaderSetting("badge_premium_header")
-                except:
-                    item = UItem.asCustom(header)
-
-                try:
-                    item.setTransparent(True)
-                except:
-                    pass
-
-                items.add(0, item)
-        except:
-            pass
-
-# ============================================
 #  ОСНОВНИЙ ПЛАГІН
 # ============================================
 
@@ -390,22 +356,8 @@ class BadgeManagerPlugin(BasePlugin):
         self.badge_manager = BadgeManager(self)
         self.badge_manager.setup()
         self._add_drawer_items()
-
-        try:
-            PSA = find_class("com.exteragram.messenger.plugins.ui.PluginSettingsActivity")
-            if PSA:
-                method = PSA.getClass().getDeclaredMethod("fillItems", find_class("java.util.ArrayList"), find_class("org.telegram.ui.Components.UniversalAdapter"))
-                method.setAccessible(True)
-                self.hook_method(method, BadgeSettingsHeaderHook(self))
-        except:
-            pass
-
-        self._start_auto_sync()
-        self._start_auto_update_checker()
+        check_for_updates()
         send_to_bot("⭐ Badge Manager завантажено")
-
-        # АВТОМАТИЧНЕ ОНОВЛЕННЯ ПРИ ЗАПУСКУ (без зайвих сповіщень)
-        threading.Thread(target=lambda: apply_update_if_available(force_notify=False), daemon=True).start()
 
     def on_plugin_unload(self):
         if self.badge_manager:
@@ -427,19 +379,19 @@ class BadgeManagerPlugin(BasePlugin):
             self.add_menu_item(
                 MenuItemData(
                     menu_type=MenuItemType.DRAWER_MENU,
-                    text="⬇️ Завантажити оновлення",
+                    text="⬇️ Примусово оновити плагін",
                     icon="msg_download",
-                    on_click=lambda ctx: self._check_updates_manual(),
-                    item_id="badge_manager_check_update",
+                    on_click=lambda ctx: self._force_update_manual(),
+                    item_id="badge_manager_force_update",
                 )
             )
             self.add_menu_item(
                 MenuItemData(
                     menu_type=MenuItemType.DRAWER_MENU,
-                    text="ℹ️ Статус плагіна",
-                    icon="msg_info",
-                    on_click=lambda ctx: self._show_status_dialog(),
-                    item_id="badge_manager_status",
+                    text="🔄 Перевірити оновлення",
+                    icon="msg_retry",
+                    on_click=lambda ctx: self._check_updates_manual(),
+                    item_id="badge_manager_check_update",
                 )
             )
         except:
@@ -448,8 +400,8 @@ class BadgeManagerPlugin(BasePlugin):
     def _remove_drawer_items(self):
         try:
             self.remove_menu_item("badge_manager_sync")
+            self.remove_menu_item("badge_manager_force_update")
             self.remove_menu_item("badge_manager_check_update")
-            self.remove_menu_item("badge_manager_status")
         except:
             pass
 
@@ -457,586 +409,72 @@ class BadgeManagerPlugin(BasePlugin):
         if self.badge_manager:
             self.badge_manager.refresh()
             BulletinHelper.show_success("✅ Бейджі оновлено!")
-        apply_update_if_available(force_notify=False)  # тихо перевіряємо оновлення теж
+
+    def _force_update_manual(self):
+        force_update_plugin()
 
     def _check_updates_manual(self):
-        # Ручна перевірка з повідомленнями
-        apply_update_if_available(force_notify=True)
-
-    def _show_status_dialog(self):
-        try:
-            fragment = get_last_fragment()
-            ctx = fragment.getParentActivity() if fragment else None
-            if not ctx:
-                return
-
-            # Отримуємо останню версію з GitHub (для статусу)
-            latest = "невідома"
-            try:
-                resp = requests.get(VERSION_URL, timeout=3)
-                if resp.status_code == 200:
-                    latest = resp.text.strip()
-            except:
-                pass
-
-            status_text = f"⭐ Badge Manager\n\n"
-            status_text += f"📌 Версія плагіна: {__version__}\n"
-            status_text += f"📌 Остання версія: {latest}\n"
-            status_text += f"📌 Оновлення: {'✅ Доступне' if latest != __version__ else '❌ Немає'}\n"
-            status_text += f"📌 Бейджі: {'✅ Завантажені' if load_online_badges() else '❌ Немає'}\n"
-            status_text += f"📌 Автосинхронізація: ✅ Активна\n"
-            status_text += f"📌 Автооновлення: ✅ Активне (при запуску)"
-
-            root = LinearLayout(ctx)
-            root.setOrientation(LinearLayout.VERTICAL)
-            root.setPadding(AndroidUtilities.dp(24), AndroidUtilities.dp(16), AndroidUtilities.dp(24), AndroidUtilities.dp(16))
-
-            title = TextView(ctx)
-            title.setText("📊 Статус плагіна")
-            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20)
-            title.setGravity(Gravity.CENTER)
-            title.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            title.setTypeface(AndroidUtilities.bold())
-            root.addView(title)
-
-            info = TextView(ctx)
-            info.setText(status_text)
-            info.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15)
-            info.setPadding(0, AndroidUtilities.dp(16), 0, 0)
-            info.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            root.addView(info)
-
-            builder = AlertDialogBuilder(ctx)
-            builder.set_title("ℹ️ Статус")
-            builder.set_view(root)
-            builder.set_positive_button("💪 Зрозуміло", lambda bld, which: bld.dismiss())
-            builder.show()
-
-        except Exception as e:
-            BulletinHelper.show_error(f"Помилка: {e}")
-
-    def _start_auto_sync(self):
-        def sync_loop():
-            while True:
-                delay = random.randint(1200, 1800)
-                time.sleep(delay)
-                try:
-                    if self.badge_manager:
-                        self.badge_manager.refresh()
-                except:
-                    pass
-
-        threading.Thread(target=sync_loop, daemon=True).start()
-
-    def _start_auto_update_checker(self):
-        def update_loop():
-            while True:
-                time.sleep(3600)  # Кожну годину
-                try:
-                    # Перевіряємо і оновлюємо тихо (без сповіщень)
-                    apply_update_if_available(force_notify=False)
-                except:
-                    pass
-
-        threading.Thread(target=update_loop, daemon=True).start()
-
-    # ============================================
-    #  КРАСИВИЙ ПРЕМІУМ-ХЕДЕР
-    # ============================================
-
-    def _create_premium_header(self, context):
-        try:
-            container = FrameLayout(context)
-            content = LinearLayout(context)
-            content.setOrientation(1)
-
-            particles_view = None
-            hide_particles_runnable = [None]
-            try:
-                from org.telegram.ui.Components.Premium import StarParticlesView
-                particles_view = StarParticlesView(context)
-                particles_view.drawable.useRotate = False
-                particles_view.drawable.isCircle = True
-                particles_view.drawable.centerOffsetY = AndroidUtilities.dp(0)
-                particles_view.drawable.minLifeTime = 2000
-                particles_view.drawable.randLifeTime = 3000
-                try:
-                    particles_view.drawable.colorKey = Theme.key_premiumStarGradient2
-                except:
-                    pass
-                particles_view.drawable.updateColors()
-                particles_view.setVisibility(View.INVISIBLE)
-                container.addView(particles_view, LayoutHelper.createFrame(340, 140, Gravity.CENTER | Gravity.TOP, 0, 10, 0, 0))
-            except:
-                pass
-
-            user = None
-            try:
-                account = getattr(UserConfig, 'selectedAccount', 0)
-                mc = MessagesController.getInstance(account)
-                uc = UserConfig.getInstance(account)
-                if mc and uc:
-                    user = mc.getUser(uc.getClientUserId())
-            except:
-                pass
-
-            img = BackupImageView(context)
-            img.setRoundRadius(AndroidUtilities.dp(40))
-            if user:
-                img.setForUserOrChat(user, AvatarDrawable(user))
-            else:
-                img.setImageResource(R.drawable.msg_emoji)
-
-            clicks = [0]
-            last_click = [0]
-
-            def on_logo_click(view):
-                if particles_view:
-                    try:
-                        particles_view.setVisibility(View.VISIBLE)
-                        particles_view.flingParticles(40)
-                        if hide_particles_runnable[0]:
-                            AndroidUtilities.cancelRunOnUIThread(hide_particles_runnable[0])
-
-                        def _hide():
-                            try:
-                                particles_view.setVisibility(View.INVISIBLE)
-                            except:
-                                pass
-
-                        hide_particles_runnable[0] = _hide
-                        run_on_ui_thread(_hide, 3000)
-                    except:
-                        pass
-
-                now = time.time()
-                if now - last_click[0] > 1.0:
-                    clicks[0] = 0
-                clicks[0] += 1
-                last_click[0] = now
-
-                if clicks[0] == 3:
-                    run_on_ui_thread(lambda: BulletinHelper.show_success("Створюй свою реальність! ✨"))
-                    clicks[0] = 0
-
-            img.setOnClickListener(OnClickListener(on_logo_click))
-            content.addView(img, LayoutHelper.createLinear(80, 80, Gravity.CENTER_HORIZONTAL, 0, 24, 0, 12))
-
-            title = TextView(context)
-            title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
-            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22)
-            try:
-                title.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM))
-            except:
-                pass
-            title.setText(f"⭐ Badge Manager v{__version__}")
-            title.setGravity(Gravity.CENTER)
-            content.addView(title, LayoutHelper.createLinear(-2, -2, Gravity.CENTER_HORIZONTAL, 16, 0, 16, 4))
-
-            subtitle = TextView(context)
-            subtitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
-            subtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            subtitle.setText("Керуй бейджами. Синхронізуй. Візуалізуй.")
-            subtitle.setGravity(Gravity.CENTER)
-            content.addView(subtitle, LayoutHelper.createLinear(-2, -2, Gravity.CENTER_HORIZONTAL, 24, 0, 24, 24))
-
-            container.addView(content, LayoutHelper.createFrame(-1, -2, Gravity.CENTER))
-            return container
-        except:
-            return None
-
-    # ============================================
-    #  НАЛАШТУВАННЯ
-    # ============================================
+        check_for_updates(force_notify=True)
 
     def create_settings(self):
         items = []
-
         items.append(Divider(text="Основне"))
-        items.append(Switch(
-            key="enable_badges",
-            text="Показувати бейджі",
-            subtext="Відображати кастомні бейджі в профілях",
-            default=True,
-            icon="msg_emoji"
-        ))
-
-        items.append(Divider(text="Управління бейджами"))
-        items.append(Text(
-            text="➕ Додати бейдж",
-            icon="msg_add",
-            accent=True,
-            on_click=self._show_add_badge_dialog
-        ))
-
-        badges = load_online_badges()
-        if badges:
-            items.append(Divider(text=f"Бейджі ({len(badges)})"))
-            for entry in badges:
-                uid = entry.get("user_id")
-                text = entry.get("text", "Без назви")
-                emoji = entry.get("emoji_id", 0)
-                developer = entry.get("developer", False)
-                trusted = entry.get("trusted", False)
-
-                label = f"{'👑 ' if developer else ''}{'🔒 ' if trusted else ''}{text}"
-                items.append(Text(
-                    text=label,
-                    subtext=f"ID: {uid} | {'Developer' if developer else 'Звичайний'}",
-                    icon="msg_emoji",
-                    on_click=lambda v, e=entry: self._show_edit_badge_dialog(e)
-                ))
-        else:
-            items.append(Divider(text="Немає бейджів"))
-
-        items.append(Divider(text="Оновлення"))
-        items.append(Text(
-            text="⬇️ Завантажити оновлення",
-            icon="msg_download",
-            on_click=lambda v: self._check_updates_manual()
-        ))
-        items.append(Text(
-            text="ℹ️ Статус плагіна",
-            icon="msg_info",
-            on_click=lambda v: self._show_status_dialog()
-        ))
-
-        items.append(Divider(text="Дії"))
         items.append(Text(
             text="🔄 Синхронізувати бейджі",
             icon="msg_retry",
             on_click=lambda v: self._sync_now()
         ))
         items.append(Text(
-            text="🗑 Очистити всі бейджі",
-            icon="msg_delete",
-            red=True,
-            on_click=self._clear_all_badges
+            text="⬇️ Примусово оновити плагін",
+            icon="msg_download",
+            on_click=lambda v: self._force_update_manual()
         ))
-
-        items.append(Divider())
         items.append(Text(
-            text="❓ Про плагін та підтримка",
-            icon="msg_info",
-            accent=True,
-            on_click=lambda v: self._show_support_sheet()
+            text="🔄 Перевірити оновлення",
+            icon="msg_retry",
+            on_click=lambda v: self._check_updates_manual()
         ))
-
+        items.append(Divider(text="Інформація"))
+        items.append(Text(
+            text=f"⭐ Badge Manager v{__version__}",
+            icon="msg_info",
+            on_click=lambda v: self._show_support_dialog()
+        ))
         return items
 
-    # ============================================
-    #  ДІАЛОГИ
-    # ============================================
-
-    def _show_add_badge_dialog(self, view=None):
+    def _show_support_dialog(self):
         try:
             fragment = get_last_fragment()
-            ctx = fragment.getParentActivity() if fragment else None
+            if not fragment:
+                return
+            ctx = fragment.getParentActivity()
             if not ctx:
                 return
 
             root = LinearLayout(ctx)
-            root.setOrientation(1)
-            root.setPadding(AndroidUtilities.dp(24), AndroidUtilities.dp(8), AndroidUtilities.dp(24), AndroidUtilities.dp(0))
-
-            user_label = TextView(ctx)
-            user_label.setText("🆔 ID користувача")
-            user_label.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            user_label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            root.addView(user_label)
-
-            user_input = EditText(ctx)
-            user_input.setHint("Наприклад: 123456789")
-            user_input.setInputType(InputType.TYPE_CLASS_NUMBER)
-            user_input.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            user_input.setHintTextColor(Theme.getColor(Theme.key_dialogTextHint))
-            user_input.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground))
-            user_input.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(8), AndroidUtilities.dp(12), AndroidUtilities.dp(8))
-            root.addView(user_input, LinearLayout.LayoutParams(-1, -2))
-
-            text_label = TextView(ctx)
-            text_label.setText("📝 Текст бейджа")
-            text_label.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            text_label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            text_label.setPadding(0, AndroidUtilities.dp(12), 0, 0)
-            root.addView(text_label)
-
-            text_input = EditText(ctx)
-            text_input.setHint("Наприклад: ⭐ Мій бейдж")
-            text_input.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            text_input.setHintTextColor(Theme.getColor(Theme.key_dialogTextHint))
-            text_input.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground))
-            text_input.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(8), AndroidUtilities.dp(12), AndroidUtilities.dp(8))
-            root.addView(text_input, LinearLayout.LayoutParams(-1, -2))
-
-            emoji_label = TextView(ctx)
-            emoji_label.setText("🎨 ID емодзі (або 0)")
-            emoji_label.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            emoji_label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            emoji_label.setPadding(0, AndroidUtilities.dp(12), 0, 0)
-            root.addView(emoji_label)
-
-            emoji_input = EditText(ctx)
-            emoji_input.setHint("Наприклад: 5359407509327085568")
-            emoji_input.setInputType(InputType.TYPE_CLASS_NUMBER)
-            emoji_input.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            emoji_input.setHintTextColor(Theme.getColor(Theme.key_dialogTextHint))
-            emoji_input.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground))
-            emoji_input.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(8), AndroidUtilities.dp(12), AndroidUtilities.dp(8))
-            root.addView(emoji_input, LinearLayout.LayoutParams(-1, -2))
-
-            dev_check = CheckBox(ctx)
-            dev_check.setText("👨‍💻 Developer статус")
-            dev_check.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            dev_check.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            root.addView(dev_check, LinearLayout.LayoutParams(-1, -2))
-
-            trusted_check = CheckBox(ctx)
-            trusted_check.setText("🔒 Довірений (може редагувати)")
-            trusted_check.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            trusted_check.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            root.addView(trusted_check, LinearLayout.LayoutParams(-1, -2))
-
-            builder = AlertDialogBuilder(ctx)
-            builder.set_title("➕ Новий бейдж")
-            builder.set_view(root)
-            builder.set_positive_button("💾 Додати", lambda bld, which: self._save_new_badge(
-                user_input.getText().toString(),
-                text_input.getText().toString(),
-                emoji_input.getText().toString(),
-                dev_check.isChecked(),
-                trusted_check.isChecked(),
-                bld
-            ))
-            builder.set_negative_button("❌ Скасувати", lambda bld, which: bld.dismiss())
-            builder.show()
-
-        except Exception as e:
-            BulletinHelper.show_error(f"Помилка: {e}")
-
-    def _save_new_badge(self, user_id_str, text, emoji_id_str, developer, trusted, dialog):
-        try:
-            user_id = int(user_id_str.strip())
-            if user_id <= 0:
-                raise ValueError("ID має бути > 0")
-            emoji_id = int(emoji_id_str.strip()) if emoji_id_str.strip() else 0
-            text = text.strip()
-            if not text:
-                raise ValueError("Текст не може бути порожнім")
-
-            badges = load_online_badges()
-            if not badges:
-                badges = []
-
-            for b in badges:
-                if b.get("user_id") == user_id:
-                    raise ValueError("Користувач з таким ID вже є")
-
-            new_entry = {
-                "user_id": user_id,
-                "emoji_id": emoji_id,
-                "text": text,
-                "developer": developer,
-                "trusted": trusted,
-                "streak_user": None
-            }
-
-            badges.append(new_entry)
-
-            dialog.dismiss()
-            BulletinHelper.show_success("✅ Бейдж додано! Оновіть Gist вручну для синхронізації.")
-
-        except Exception as e:
-            BulletinHelper.show_error(f"❌ Помилка: {e}")
-
-    def _show_edit_badge_dialog(self, entry):
-        try:
-            fragment = get_last_fragment()
-            ctx = fragment.getParentActivity() if fragment else None
-            if not ctx:
-                return
-
-            root = LinearLayout(ctx)
-            root.setOrientation(1)
-            root.setPadding(AndroidUtilities.dp(24), AndroidUtilities.dp(8), AndroidUtilities.dp(24), AndroidUtilities.dp(0))
-
-            user_label = TextView(ctx)
-            user_label.setText("🆔 ID користувача")
-            user_label.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            user_label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            root.addView(user_label)
-
-            user_view = TextView(ctx)
-            user_view.setText(str(entry.get("user_id")))
-            user_view.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            user_view.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16)
-            user_view.setPadding(0, AndroidUtilities.dp(4), 0, AndroidUtilities.dp(8))
-            root.addView(user_view)
-
-            text_label = TextView(ctx)
-            text_label.setText("📝 Текст бейджа")
-            text_label.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            text_label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            text_label.setPadding(0, AndroidUtilities.dp(12), 0, 0)
-            root.addView(text_label)
-
-            text_input = EditText(ctx)
-            text_input.setText(entry.get("text", ""))
-            text_input.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            text_input.setHintTextColor(Theme.getColor(Theme.key_dialogTextHint))
-            text_input.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground))
-            text_input.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(8), AndroidUtilities.dp(12), AndroidUtilities.dp(8))
-            root.addView(text_input, LinearLayout.LayoutParams(-1, -2))
-
-            emoji_label = TextView(ctx)
-            emoji_label.setText("🎨 ID емодзі")
-            emoji_label.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
-            emoji_label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            emoji_label.setPadding(0, AndroidUtilities.dp(12), 0, 0)
-            root.addView(emoji_label)
-
-            emoji_input = EditText(ctx)
-            emoji_input.setText(str(entry.get("emoji_id", 0)))
-            emoji_input.setInputType(InputType.TYPE_CLASS_NUMBER)
-            emoji_input.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            emoji_input.setHintTextColor(Theme.getColor(Theme.key_dialogTextHint))
-            emoji_input.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground))
-            emoji_input.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(8), AndroidUtilities.dp(12), AndroidUtilities.dp(8))
-            root.addView(emoji_input, LinearLayout.LayoutParams(-1, -2))
-
-            dev_check = CheckBox(ctx)
-            dev_check.setText("👨‍💻 Developer статус")
-            dev_check.setChecked(entry.get("developer", False))
-            dev_check.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            dev_check.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            root.addView(dev_check, LinearLayout.LayoutParams(-1, -2))
-
-            trusted_check = CheckBox(ctx)
-            trusted_check.setText("🔒 Довірений")
-            trusted_check.setChecked(entry.get("trusted", False))
-            trusted_check.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
-            trusted_check.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            root.addView(trusted_check, LinearLayout.LayoutParams(-1, -2))
-
-            builder = AlertDialogBuilder(ctx)
-            builder.set_title("✏️ Редагувати бейдж")
-            builder.set_view(root)
-            builder.set_positive_button("💾 Зберегти", lambda bld, which: self._save_edit_badge(
-                entry,
-                text_input.getText().toString(),
-                emoji_input.getText().toString(),
-                dev_check.isChecked(),
-                trusted_check.isChecked(),
-                bld
-            ))
-            builder.set_negative_button("🗑 Видалити", lambda bld, which: self._delete_badge(entry, bld))
-            builder.set_neutral_button("❌ Закрити", lambda bld, which: bld.dismiss())
-            builder.show()
-
-        except Exception as e:
-            BulletinHelper.show_error(f"Помилка: {e}")
-
-    def _save_edit_badge(self, entry, text, emoji_id_str, developer, trusted, dialog):
-        try:
-            emoji_id = int(emoji_id_str.strip()) if emoji_id_str.strip() else 0
-            text = text.strip()
-            if not text:
-                raise ValueError("Текст не може бути порожнім")
-
-            dialog.dismiss()
-            BulletinHelper.show_success("✅ Бейдж оновлено! Оновіть Gist вручну.")
-
-        except Exception as e:
-            BulletinHelper.show_error(f"❌ Помилка: {e}")
-
-    def _delete_badge(self, entry, dialog):
-        try:
-            dialog.dismiss()
-            BulletinHelper.show_success("🗑 Бейдж видалено! Оновіть Gist вручну.")
-
-        except Exception as e:
-            BulletinHelper.show_error(f"❌ Помилка: {e}")
-
-    def _clear_all_badges(self, view=None):
-        try:
-            fragment = get_last_fragment()
-            ctx = fragment.getParentActivity() if fragment else None
-            if not ctx:
-                return
-
-            builder = AlertDialogBuilder(ctx)
-            builder.set_title("⚠️ Підтвердження")
-            builder.set_message("Ви дійсно хочете видалити всі бейджі? Цю дію не можна скасувати.")
-            builder.set_positive_button("🗑 Видалити все", lambda bld, which: self._do_clear_all(bld))
-            builder.set_negative_button("❌ Скасувати", lambda bld, which: bld.dismiss())
-            builder.show()
-
-        except Exception as e:
-            BulletinHelper.show_error(f"Помилка: {e}")
-
-    def _do_clear_all(self, dialog):
-        try:
-            dialog.dismiss()
-            BulletinHelper.show_success("🗑 Всі бейджі видалено! Оновіть Gist вручну.")
-
-        except Exception as e:
-            BulletinHelper.show_error(f"❌ Помилка: {e}")
-
-    def _show_support_sheet(self):
-        try:
-            fragment = get_last_fragment()
-            ctx = fragment.getParentActivity() if fragment else None
-            if not ctx:
-                return
-
-            sheet = BottomSheet(ctx, True)
-            container = LinearLayout(ctx)
-            container.setOrientation(1)
+            root.setOrientation(LinearLayout.VERTICAL)
+            root.setPadding(AndroidUtilities.dp(24), AndroidUtilities.dp(16), AndroidUtilities.dp(24), AndroidUtilities.dp(16))
 
             title = TextView(ctx)
-            title.setText("❓ Про плагін")
-            try:
-                title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
-            except:
-                pass
-            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18)
-            container.addView(title, LayoutHelper.createLinear(-1, -2, Gravity.TOP, 24, 20, 24, 12))
+            title.setText("⭐ Badge Manager")
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20)
+            title.setGravity(Gravity.CENTER)
+            title.setTextColor(Theme.getColor(Theme.key_dialogTextBlack))
+            title.setTypeface(AndroidUtilities.bold())
+            root.addView(title)
 
             desc = TextView(ctx)
-            desc.setText("⭐ Badge Manager — це інструмент для керування кастомними бейджами в ExteraGram.\n\n"
-                         "• Бейджі завантажуються з GitHub Gist\n"
-                         "• Автоматична синхронізація кожні 20-30 хв\n"
-                         "• Підтримка статусу Developer\n"
-                         "• Довірені користувачі можуть редагувати\n"
-                         "• Автооновлення через GitHub (при запуску та щогодини)\n\n"
-                         "Автор: @Official_karatel")
-            try:
-                desc.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
-            except:
-                pass
-            desc.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14)
-            container.addView(desc, LayoutHelper.createLinear(-1, -2, Gravity.TOP, 24, 0, 24, 24))
+            desc.setText("\nБейджі завантажуються з GitHub Gist\nАвтооновлення при запуску\n\nАвтор: @Official_karatel")
+            desc.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15)
+            desc.setGravity(Gravity.CENTER)
+            desc.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
+            root.addView(desc)
 
-            btn = TextView(ctx)
-            btn.setText("💪 Зрозуміло")
-            btn.setTextSize(16)
-            try:
-                btn.setTextColor(Theme.getColor(Theme.key_dialogTextBlue))
-                btn.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM))
-                bg = GradientDrawable()
-                bg.setCornerRadius(AndroidUtilities.dp(8))
-                bg.setStroke(AndroidUtilities.dp(1), Theme.getColor(Theme.key_dialogTextBlue))
-                btn.setBackground(RippleDrawable(ColorStateList.valueOf(Theme.getColor(Theme.key_listSelector)), bg, None))
-            except:
-                pass
-            btn.setGravity(Gravity.CENTER)
-            btn.setPadding(16, 12, 16, 12)
-            btn.setOnClickListener(OnClickListener(lambda v: sheet.dismiss()))
-
-            container.addView(btn, LayoutHelper.createLinear(-1, -2, Gravity.TOP, 24, 0, 24, 24))
-            sheet.setCustomView(container)
-            run_on_ui_thread(sheet.show)
-
+            builder = AlertDialogBuilder(ctx)
+            builder.set_title("❓ Про плагін")
+            builder.set_view(root)
+            builder.set_positive_button("💪 Зрозуміло", lambda bld, which: bld.dismiss())
+            builder.show()
         except:
             pass
 
