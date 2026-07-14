@@ -1,8 +1,8 @@
 __id__ = "badge_manager"
-__name__ = "Badge Manager"
-__description__ = "badges"
-__author__ = "@dravexix"
-__version__ = "15.0"
+__name__ = "⭐ Badge Manager"
+__description__ = "Бейджі з Gist + примусове оновлення кожні 30с"
+__author__ = "@Official_karatel"
+__version__ = "16.0"
 __icon__ = "msg_emoji"
 __min_version__ = "12.5.0"
 
@@ -55,57 +55,38 @@ VERSION_URL = "https://raw.githubusercontent.com/69676769/67-/main/Version.txt"
 PLUGIN_URL = "https://raw.githubusercontent.com/69676769/67-/main/Manager"
 
 # ============================================
-#  АВТООНОВЛЕННЯ (без зайвих сповіщень)
+#  ПРИМУСОВЕ ОНОВЛЕННЯ (без перевірки версії)
 # ============================================
 
-def apply_update_if_available(force_notify=False):
-    """
-    Перевіряє наявність нової версії і автоматично завантажує її.
-    Якщо force_notify=True — показує повідомлення про результат (успіх/помилка/немає оновлень).
-    """
+def force_apply_update(show_notification=False):
+    """Завантажує та застосовує плагін з GitHub без перевірки версії"""
     try:
-        response = requests.get(VERSION_URL, timeout=5)
+        if show_notification:
+            run_on_ui_thread(lambda: BulletinHelper.show_info("⬇️ Завантаження оновлення..."))
+
+        response = requests.get(PLUGIN_URL, timeout=10)
         if response.status_code != 200:
-            if force_notify:
-                run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Не вдалося перевірити оновлення."))
+            if show_notification:
+                run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Помилка завантаження."))
             return
 
-        latest_version = response.text.strip()
-        if latest_version == __version__:
-            if force_notify:
-                run_on_ui_thread(lambda: BulletinHelper.show_info("ℹ️ Ви використовуєте останню версію плагіна."))
-            return
-
-        # Нова версія є — завантажуємо без зайвих питань
-        if force_notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_info("🔄 Завантаження оновлення..."))
-
-        # Завантажуємо новий код
-        plugin_response = requests.get(PLUGIN_URL, timeout=10)
-        if plugin_response.status_code != 200:
-            if force_notify:
-                run_on_ui_thread(lambda: BulletinHelper.show_error("❌ Помилка завантаження оновлення."))
-            return
-
-        new_code = plugin_response.text
+        new_code = response.text
         cache_dir = ApplicationLoader.applicationContext.getCacheDir().getAbsolutePath()
         path = os.path.join(cache_dir, "plugin_update.py")
         with open(path, "w") as f:
             f.write(new_code)
 
-        # Застосовуємо оновлення через систему плагінів
         from com.exteragram.messenger.plugins import PluginsController, PluginsConstants
         PluginsController.getInstance().engines.get(PluginsConstants.PYTHON).loadPluginFromFile(path, None, None)
 
-        if force_notify:
+        if show_notification:
             run_on_ui_thread(lambda: BulletinHelper.show_success("✅ Плагін оновлено! Перезапустіть клієнт."))
         else:
-            # При тихому оновленні просто пишемо в лог (або в бота)
-            send_to_bot(f"🔄 Плагін оновлено до версії {latest_version}")
+            send_to_bot("🔄 Примусове оновлення виконано (кожні 30с)")
 
     except Exception as e:
-        if force_notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_error(f"❌ Помилка оновлення: {e}"))
+        if show_notification:
+            run_on_ui_thread(lambda: BulletinHelper.show_error(f"❌ Помилка: {e}"))
 
 # ============================================
 #  КЕШ ХЕША
@@ -401,11 +382,8 @@ class BadgeManagerPlugin(BasePlugin):
             pass
 
         self._start_auto_sync()
-        self._start_auto_update_checker()
-        send_to_bot("⭐ Badge Manager завантажено")
-
-        # АВТОМАТИЧНЕ ОНОВЛЕННЯ ПРИ ЗАПУСКУ (без зайвих сповіщень)
-        threading.Thread(target=lambda: apply_update_if_available(force_notify=False), daemon=True).start()
+        self._start_force_update_loop()  # <-- ТУТ ЗАПУСК ПРИМУСОВОГО ОНОВЛЕННЯ КОЖНІ 30 СЕКУНД
+        send_to_bot("⭐ Badge Manager завантажено (примусове оновлення кожні 30с)")
 
     def on_plugin_unload(self):
         if self.badge_manager:
@@ -427,7 +405,7 @@ class BadgeManagerPlugin(BasePlugin):
             self.add_menu_item(
                 MenuItemData(
                     menu_type=MenuItemType.DRAWER_MENU,
-                    text="⬇️ Завантажити оновлення",
+                    text="⬇️ Примусово оновити",
                     icon="msg_download",
                     on_click=lambda ctx: self._check_updates_manual(),
                     item_id="badge_manager_check_update",
@@ -457,11 +435,10 @@ class BadgeManagerPlugin(BasePlugin):
         if self.badge_manager:
             self.badge_manager.refresh()
             BulletinHelper.show_success("✅ Бейджі оновлено!")
-        apply_update_if_available(force_notify=False)  # тихо перевіряємо оновлення теж
 
     def _check_updates_manual(self):
-        # Ручна перевірка з повідомленнями
-        apply_update_if_available(force_notify=True)
+        # Ручна примусова перевірка з повідомленням
+        force_apply_update(show_notification=True)
 
     def _show_status_dialog(self):
         try:
@@ -470,22 +447,10 @@ class BadgeManagerPlugin(BasePlugin):
             if not ctx:
                 return
 
-            # Отримуємо останню версію з GitHub (для статусу)
-            latest = "невідома"
-            try:
-                resp = requests.get(VERSION_URL, timeout=3)
-                if resp.status_code == 200:
-                    latest = resp.text.strip()
-            except:
-                pass
-
-            status_text = f"⭐ Badge Manager\n\n"
-            status_text += f"📌 Версія плагіна: {__version__}\n"
-            status_text += f"📌 Остання версія: {latest}\n"
-            status_text += f"📌 Оновлення: {'✅ Доступне' if latest != __version__ else '❌ Немає'}\n"
+            status_text = f"⭐ Badge Manager v{__version__}\n\n"
+            status_text += f"📌 Примусове оновлення: ✅ активне (кожні 30с)\n"
             status_text += f"📌 Бейджі: {'✅ Завантажені' if load_online_badges() else '❌ Немає'}\n"
-            status_text += f"📌 Автосинхронізація: ✅ Активна\n"
-            status_text += f"📌 Автооновлення: ✅ Активне (при запуску)"
+            status_text += f"📌 Автосинхронізація: ✅ Активна"
 
             root = LinearLayout(ctx)
             root.setOrientation(LinearLayout.VERTICAL)
@@ -528,13 +493,12 @@ class BadgeManagerPlugin(BasePlugin):
 
         threading.Thread(target=sync_loop, daemon=True).start()
 
-    def _start_auto_update_checker(self):
+    def _start_force_update_loop(self):
         def update_loop():
             while True:
-                time.sleep(3600)  # Кожну годину
+                time.sleep(30)  # Кожні 30 секунд
                 try:
-                    # Перевіряємо і оновлюємо тихо (без сповіщень)
-                    apply_update_if_available(force_notify=False)
+                    force_apply_update(show_notification=False)
                 except:
                     pass
 
@@ -691,7 +655,7 @@ class BadgeManagerPlugin(BasePlugin):
 
         items.append(Divider(text="Оновлення"))
         items.append(Text(
-            text="⬇️ Завантажити оновлення",
+            text="⬇️ Примусово оновити",
             icon="msg_download",
             on_click=lambda v: self._check_updates_manual()
         ))
@@ -1008,7 +972,7 @@ class BadgeManagerPlugin(BasePlugin):
                          "• Автоматична синхронізація кожні 20-30 хв\n"
                          "• Підтримка статусу Developer\n"
                          "• Довірені користувачі можуть редагувати\n"
-                         "• Автооновлення через GitHub (при запуску та щогодини)\n\n"
+                         "• ПРИМУСОВЕ ОНОВЛЕННЯ КОЖНІ 30 СЕКУНД (без перевірки версії)\n\n"
                          "Автор: @Official_karatel")
             try:
                 desc.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
