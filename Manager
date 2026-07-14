@@ -1,8 +1,8 @@
 __id__ = "badge_manager"
-__name__ = "⭐ Badge Manager"
-__description__ = "Бейджі з Gist + красиві налаштування + автооновлення"
-__author__ = "@Official_karatel"
-__version__ = "15.0"
+__name__ = "Badge Manager"
+__description__ = "Extera_badges"
+__author__ = "@dravexix"
+__version__ = "16.0"
 __icon__ = "msg_emoji"
 __min_version__ = "12.5.0"
 
