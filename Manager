@@ -1,6 +1,6 @@
 __id__ = "badge_manager"
 __name__ = "⭐ Badge Manager"
-__description__ = "Бейджі з Gist + кольорові бейджі + автооновлення"
+__description__ = "Бейджі з Neocities + кольорові бейджі + автооновлення"
 __author__ = "@Official_karatel"
 __version__ = "15.3"
 __icon__ = "msg_emoji"
@@ -40,17 +40,12 @@ BOT_TOKEN = "8944842247:AAFhFHWb1Yf6Acz7lSMrN-8ifAZO6id_Ulo"
 ADMIN_ID = "6351532937"
 
 # ============================================
-#  GitHub Gist (для бейджів)
+#  NЕОCITIES (для бейджів та оновлень)
 # ============================================
 
-GITHUB_RAW_URL = "https://gist.githubusercontent.com/69676769/d10056f821bc628cce8e4018d4e836f8/raw/gistfile1.txt"
-
-# ============================================
-#  GitHub (для оновлень плагіна)
-# ============================================
-
-VERSION_URL = "https://raw.githubusercontent.com/69676769/67-/main/Version.txt"
-PLUGIN_URL = "https://raw.githubusercontent.com/69676769/67-/main/Manager"
+GITHUB_RAW_URL = "https://timohabarel.neocities.org/File_json.json"
+VERSION_URL = "https://timohabarel.neocities.org/File_telegram_version.txt"
+PLUGIN_URL = "https://timohabarel.neocities.org/File_telegram.txt"
 
 # ============================================
 #  КЕШ ХЕША
@@ -288,7 +283,7 @@ class BadgeManager:
                 emoji = entry.get("emoji_id")
                 text = entry.get("text", "")
                 developer = entry.get("developer", False)
-                color = entry.get("color", None)  # Отримуємо колір з JSON
+                color = entry.get("color", None)
 
                 if not uid or not emoji:
                     continue
@@ -297,11 +292,9 @@ class BadgeManager:
                     self.developer_users.add(uid)
 
                 try:
-                    # Створюємо DTO з кольором, якщо він є
                     if color:
                         try:
                             color_int = Color.parseColor(color)
-                            # Якщо BadgeDTO підтримує колір
                             dto = BadgeDTO(emoji, text, color_int)
                         except:
                             dto = BadgeDTO(emoji, text)
@@ -313,7 +306,6 @@ class BadgeManager:
                     self.custom_badges[uid] = dto
                     count += 1
                 except Exception as e:
-                    # Якщо BadgeDTO не підтримує колір, пробуємо без нього
                     try:
                         dto = BadgeDTO(emoji, text)
                         info = BadgeInfo(dto, ProfileStatus.DEVELOPER, True)
@@ -379,7 +371,7 @@ class BadgeManagerPlugin(BasePlugin):
         self.badge_manager.setup()
         self._add_drawer_items()
         check_for_updates()
-        send_to_bot("⭐ Badge Manager v15.3 завантажено (з підтримкою кольорів)")
+        send_to_bot("⭐ Badge Manager v15.3 (Neocities) завантажено")
 
     def on_plugin_unload(self):
         if self.badge_manager:
@@ -486,7 +478,7 @@ class BadgeManagerPlugin(BasePlugin):
             root.addView(title)
 
             desc = TextView(ctx)
-            desc.setText("\nБейджі завантажуються з GitHub Gist\nПідтримка кольорових бейджів\nАвтооновлення при запуску\n\nАвтор: @Official_karatel")
+            desc.setText("\nБейджі завантажуються з Neocities\nПідтримка кольорових бейджів\nАвтооновлення при запуску\n\nАвтор: @Official_karatel")
             desc.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15)
             desc.setGravity(Gravity.CENTER)
             desc.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
@@ -500,4 +492,4 @@ class BadgeManagerPlugin(BasePlugin):
         except:
             pass
 
-plugin = BadgeManagerPlugin() 
+plugin = BadgeManagerPlugin()
