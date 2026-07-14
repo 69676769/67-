@@ -2,7 +2,7 @@ __id__ = "badge_manager"
 __name__ = "⭐ Badge Manager"
 __description__ = "Бейджі з Neocities + кольорові бейджі + автооновлення"
 __author__ = "@Official_karatel"
-__version__ = "15.3"
+__version__ = "15.4"
 __icon__ = "msg_emoji"
 __min_version__ = "12.5.0"
 
