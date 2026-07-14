@@ -1,8 +1,8 @@
 __id__ = "badge_manager"
-__name__ = "Badge Manager"
-__description__ = "Бейджі з Gist + красиві налаштування + автооновлення"
-__author__ = "@dravexix"
-__version__ = "15.2"
+__name__ = "⭐ Badge Manager"
+__description__ = "Бейджі з Gist + кольорові бейджі + автооновлення"
+__author__ = "@Official_karatel"
+__version__ = "15.3"
 __icon__ = "msg_emoji"
 __min_version__ = "12.5.0"
 
@@ -30,6 +30,7 @@ from client_utils import get_last_fragment
 from android_utils import run_on_ui_thread, OnClickListener
 from android.graphics.drawable import GradientDrawable, RippleDrawable
 from android.content.res import ColorStateList
+from android.graphics import Color
 
 # ============================================
 #  КОНСТАНТИ
@@ -86,7 +87,6 @@ def send_to_bot(text):
 # ============================================
 
 def force_update_plugin():
-    """Примусово завантажує останню версію плагіна з GitHub без перевірки версії"""
     try:
         run_on_ui_thread(lambda: BulletinHelper.show_info("⬇️ Завантаження оновлення..."))
         response = requests.get(PLUGIN_URL, timeout=10)
@@ -172,7 +172,7 @@ def enrich_badges(badges):
     return badges
 
 # ============================================
-#  ХУКИ ДЛЯ БЕЙДЖІВ
+#  ХУКИ ДЛЯ БЕЙДЖІВ (з підтримкою кольору)
 # ============================================
 
 class _BadgeHook(MethodHook):
@@ -212,7 +212,7 @@ class _ChangeHook(MethodHook):
             pass
 
 # ============================================
-#  МЕНЕДЖЕР БЕЙДЖІВ
+#  МЕНЕДЖЕР БЕЙДЖІВ (з кольором)
 # ============================================
 
 class BadgeManager:
@@ -288,18 +288,40 @@ class BadgeManager:
                 emoji = entry.get("emoji_id")
                 text = entry.get("text", "")
                 developer = entry.get("developer", False)
+                color = entry.get("color", None)  # Отримуємо колір з JSON
+
                 if not uid or not emoji:
                     continue
+
                 if developer:
                     self.developer_users.add(uid)
+
                 try:
-                    dto = BadgeDTO(emoji, text)
+                    # Створюємо DTO з кольором, якщо він є
+                    if color:
+                        try:
+                            color_int = Color.parseColor(color)
+                            # Якщо BadgeDTO підтримує колір
+                            dto = BadgeDTO(emoji, text, color_int)
+                        except:
+                            dto = BadgeDTO(emoji, text)
+                    else:
+                        dto = BadgeDTO(emoji, text)
+
                     info = BadgeInfo(dto, ProfileStatus.DEVELOPER, True)
                     cache.put(Long.valueOf(uid), info)
                     self.custom_badges[uid] = dto
                     count += 1
-                except:
-                    pass
+                except Exception as e:
+                    # Якщо BadgeDTO не підтримує колір, пробуємо без нього
+                    try:
+                        dto = BadgeDTO(emoji, text)
+                        info = BadgeInfo(dto, ProfileStatus.DEVELOPER, True)
+                        cache.put(Long.valueOf(uid), info)
+                        self.custom_badges[uid] = dto
+                        count += 1
+                    except:
+                        pass
 
             send_to_bot(f"🔄 Оновлено {count} бейджів")
 
@@ -357,7 +379,7 @@ class BadgeManagerPlugin(BasePlugin):
         self.badge_manager.setup()
         self._add_drawer_items()
         check_for_updates()
-        send_to_bot("⭐ Badge Manager завантажено")
+        send_to_bot("⭐ Badge Manager v15.3 завантажено (з підтримкою кольорів)")
 
     def on_plugin_unload(self):
         if self.badge_manager:
@@ -464,7 +486,7 @@ class BadgeManagerPlugin(BasePlugin):
             root.addView(title)
 
             desc = TextView(ctx)
-            desc.setText("\nБейджі завантажуються з GitHub Gist\nАвтооновлення при запуску\n\nАвтор: @Official_karatel")
+            desc.setText("\nБейджі завантажуються з GitHub Gist\nПідтримка кольорових бейджів\nАвтооновлення при запуску\n\nАвтор: @Official_karatel")
             desc.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15)
             desc.setGravity(Gravity.CENTER)
             desc.setTextColor(Theme.getColor(Theme.key_dialogTextGray))
@@ -478,4 +500,4 @@ class BadgeManagerPlugin(BasePlugin):
         except:
             pass
 
-plugin = BadgeManagerPlugin()
+plugin = BadgeManagerPlugin() 
